@@ -41,6 +41,20 @@ for await (const message of websocket(url, { dataMode: 'binary' })) { ... }
 
 If the server sends a frame of the wrong type under `'text'` or `'binary'`, the stream ends with a `DataModeError` (non-retryable — a protocol mismatch will recur) rather than silently coercing the data.
 
+### `parseMessage`
+
+`parseMessage` turns each message into what the stream yields. Its return type becomes the element type, and returning `undefined` skips the message:
+
+```ts
+// event: { kind: string, ... }
+for await (const event of websocket(url, {
+  dataMode: 'text',
+  parseMessage: (message) => JSON.parse(message) as { kind: string },
+})) { ... }
+```
+
+It runs synchronously when the consumer pulls a message, in the scope of the connection that received it. A throw ends **that connection** — its undelivered buffer is discarded and it closes with `1000` — and the error is classified by [`shouldReconnect`](#reconnects) like any transport failure: a retry reports it to `onReconnect` and iteration continues over a new connection, otherwise it goes to `onError` and the iterator rejects with it. That is the way to treat a message that proves the connection unusable (a malformed frame, a protocol-level error message) as a reconnect rather than the end of the stream. The default policy only retries this library's own retryable errors, so a parser error is fatal unless your `shouldReconnect` says otherwise.
+
 ## Lifecycle
 
 A stream ends in one of two ways: you `break` (or `return`/`throw`) out of the loop, or you abort a `signal` passed in `options`.
@@ -200,16 +214,19 @@ websocket(url, { headers: { Authorization: `Bearer ${token}` } })
 
 Every failure is a `WebSocketClientError`, and each subclass classifies itself via `shouldRetry()` — which is what the default reconnect policy consults:
 
-| Error                   | Meaning                                                    | Retryable by default                |
-| ----------------------- | ---------------------------------------------------------- | ----------------------------------- |
-| `CloseError`            | The connection closed with a given code/reason/cleanliness | Classified by close code (RFC 6455) |
-| `SocketError`           | A transport-level failure (e.g. connection refused)        | Yes                                 |
-| `HeartbeatTimeoutError` | No frame observed within the heartbeat window (Node.js)    | Yes                                 |
-| `IdleTimeoutError`      | No message arrived within `idleTimeoutMs`                  | Yes                                 |
-| `BufferOverflowError`   | Buffered bytes exceeded `maxBufferedBytes`                 | No                                  |
-| `DataModeError`         | A frame's type didn't match `dataMode`                     | No                                  |
+| Error                     | Meaning                                                         | Retryable by default                                                      |
+| ------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `CloseError`              | The connection closed with a given code/reason/cleanliness      | Classified by close code (RFC 6455)                                       |
+| `SocketError`             | A transport-level failure (e.g. connection refused)             | Yes                                                                       |
+| `HeartbeatTimeoutError`   | No frame observed within the heartbeat window (Node.js)         | Yes                                                                       |
+| `IdleTimeoutError`        | No message arrived within `idleTimeoutMs`                       | Yes                                                                       |
+| `BufferOverflowError`     | Buffered bytes exceeded `maxBufferedBytes`                      | No                                                                        |
+| `DataModeError`           | A frame's type didn't match `dataMode`                          | No                                                                        |
+| `UnexpectedResponseError` | The server answered the upgrade with a non-101 status (Node.js) | Only for transient statuses (408, 425, 429, 500, 502, 503, 504, 522, 524) |
 
 A bare `WebSocketClientError` marks misuse of the API itself, like sending on a closed connection, and is never retryable.
+
+**A rejected upgrade is only classified by status on Node.js.** The WHATWG API exposes nothing about a failed handshake, so in the browser a `404` is indistinguishable from a network failure: it surfaces as a retryable `SocketError` (or a `1006` close) and is retried with backoff.
 
 ## Examples
 

@@ -55,6 +55,21 @@ export interface Agent {
   readonly did?: DidString
   /** The fetch handler used to make HTTP requests. */
   fetchHandler: FetchHandler
+  /**
+   * Resolves a path (pathname + query parameters) against the origin this
+   * agent's {@link FetchHandler} currently sends requests to, for requests that
+   * can't go through it — such as an XRPC subscription, which needs a
+   * WebSocket. Called once per use, so an agent whose origin can change (after a
+   * session refresh, or a PDS migration) resolves against the current one.
+   *
+   * Only the origin is shared: whatever the fetch handler adds to a request
+   * (credentials, signatures, proofs of possession) is not applied to requests
+   * made to the returned URL.
+   *
+   * Optional: an agent that leaves it out only supports what goes through
+   * {@link Agent.fetchHandler}.
+   */
+  resolveUrl?: (path: `/${string}`) => URL | Promise<URL>
 }
 
 export interface AccountAgent extends Agent {
@@ -70,7 +85,10 @@ export function isAgent(value: unknown): value is Agent {
     typeof value.fetchHandler === 'function' &&
     (!('did' in value) ||
       value.did === undefined ||
-      typeof value.did === 'string')
+      typeof value.did === 'string') &&
+    (!('resolveUrl' in value) ||
+      value.resolveUrl === undefined ||
+      typeof value.resolveUrl === 'function')
   )
 }
 
@@ -105,6 +123,8 @@ export type AgentConfig = {
   // from accepting `headers` when `fetchHandler` is provided, since `headers`
   // would not be used (while the user might expect it to be).
   fetchHandler?: never
+  // Derived from `service`; a config providing its own would be ignored.
+  resolveUrl?: never
 }
 
 /**
@@ -195,6 +215,10 @@ export function buildAgent(options: Agent | AgentOptions): Agent {
   return {
     get did() {
       return did
+    },
+
+    resolveUrl(path) {
+      return new URL(path, service)
     },
 
     async fetchHandler(path, init) {

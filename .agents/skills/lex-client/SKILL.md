@@ -6,10 +6,12 @@ description: >
   service, wiring one service to call another, logging in with OAuth or an app
   password, reading or writing repository records, uploading or fetching blobs,
   configuring headers, labelers, service proxying, retries, or request/response
-  validation, handling XRPC errors, or composing reusable client actions. Also
-  use when replacing `AtpAgent`, `XrpcClient`, or a hand-rolled `fetch` call to
-  an `/xrpc/` endpoint. For a full migration off the legacy client stack, use
-  the lexification-client skill.
+  validation, handling XRPC errors, composing reusable client actions, or
+  consuming an XRPC subscription (WebSocket event stream, firehose,
+  `subscribeRepos`, `subscribeLabels`). Also use when replacing `AtpAgent`,
+  `XrpcClient`, `@atproto/xrpc-server`'s `Subscription`, or a hand-rolled
+  `fetch` call to an `/xrpc/` endpoint. For a full migration off the legacy
+  client stack, use the lexification-client skill.
 disable-model-invocation: false
 ---
 
@@ -36,7 +38,8 @@ await xrpc(hostUrl, com.atproto.sync.requestCrawl, { body: { hostname } })
 ## Constructing
 
 The constructor takes an `Agent` (anything with `fetchHandler`, optionally
-`did`) or `AgentOptions` (a URL string/`URL`, or an `AgentConfig`).
+`did` and `resolveUrl`) or `AgentOptions` (a URL string/`URL`, or an
+`AgentConfig`).
 
 ```ts
 import { Client } from '@atproto/lex-client'
@@ -269,6 +272,31 @@ Set `maxRetries` (default `0`); tune with `minRetryTimeout` (500ms),
 `retry(failure, { counter })`. The defaults already cover the retryable status
 codes (408, 425, 429, 5xx) and network errors, so do not wrap calls in a manual
 retry loop.
+
+## Subscriptions
+
+`client.subscribe(ns, options)` and the standalone `xrpcSubscribe(agentOpts,
+ns, options)` return an async generator of validated messages (`$type`
+restored), reconnecting with backoff across failures. Use them instead of
+`@atproto/xrpc-server`'s `Subscription` or a raw WebSocket, and don't wrap them
+in a reconnect loop.
+
+- The URL comes from `agent.resolveUrl()`; agents without it (a bare
+  `FetchHandler`) throw a `TypeError` at call time. Only the origin is shared:
+  the agent's credentials and the client's `headers`/`service`/`labelers` are
+  not applied. The client's `validateResponse`/`strictResponseProcessing`
+  defaults are.
+- Resume from a cursor with a function: `params: () => ({ cursor })` is
+  re-invoked on every connection. `client.subscribeRepos({ cursor })` tracks
+  the last yielded `seq` itself; pass `cursor` as a function to own it instead.
+- Every error reaching the loop or the `shouldReconnect`/`onReconnect`/`onError`
+  hooks is an `XrpcSubscriptionError` (connection failures wrap the
+  `@atproto/ws-client` error as `cause`), except an abort reason, which rejects
+  as-is. The default policy is `error.shouldRetry()`: error frames are only
+  retried for transient codes, so retrying e.g. `ConsumerTooSlow` is an explicit
+  `shouldReconnect`.
+- `onInvalidMessage` (throws by default) skips a message that fails validation
+  by returning.
 
 ## Records
 

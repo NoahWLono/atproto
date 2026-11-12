@@ -36,9 +36,26 @@ type ConnectionOptions<M extends DataMode> = Partial<
 
 export interface WebSocketOptions<
   M extends DataMode,
+  T = MessageOf<M>,
 > extends ConnectionOptions<M> {
   /** Exponential-backoff ceiling in seconds. Default 64. */
   maxReconnectSeconds?: number
+  /**
+   * Turns each message into what the stream yields, in the scope of the
+   * connection that received it. Runs synchronously when the consumer pulls the
+   * message, not when it arrives, so it adds no work to the receive path.
+   *
+   * The return value is yielded; `undefined` skips the message. A throw ends
+   * the connection that delivered the message — its undelivered buffer is
+   * discarded and it closes with 1000 — and the error is then classified by
+   * `shouldReconnect` exactly like a transport failure: a retry reports it to
+   * `onReconnect` and the stream carries on over a new connection, anything
+   * else reports it to `onError` and the iterator rejects with it. This is how a
+   * caller turns a message that proves the connection is unusable (a malformed
+   * frame, a protocol-level error message) into a reconnect or a terminal
+   * failure, rather than having to end the whole stream.
+   */
+  parseMessage?: (message: MessageOf<M>) => T | undefined
   /** Abort to end the stream permanently; the iterator rejects with the reason. */
   signal?: AbortSignal
   /**
@@ -117,11 +134,10 @@ export interface WebSocketOptions<
  * sent to the server; any other value results in a normal close with code 1000
  * and no message.
  */
-export type WebSocketIterable<M extends DataMode = 'auto'> = AsyncGenerator<
-  MessageOf<M>,
-  void,
-  unknown
->
+export type WebSocketIterable<
+  M extends DataMode = 'auto',
+  T = MessageOf<M>,
+> = AsyncGenerator<T, void, unknown>
 
 /**
  * Binds a platform transport factory into the public `websocket()` generator.
@@ -129,12 +145,15 @@ export type WebSocketIterable<M extends DataMode = 'auto'> = AsyncGenerator<
  * platform.
  */
 
-export async function* websocketFactory<M extends DataMode = 'auto'>(
+export async function* websocketFactory<
+  M extends DataMode = 'auto',
+  T = MessageOf<M>,
+>(
   url: string | URL | (() => Awaitable<string | URL>),
   createTransport: TransportFactory,
-  options: WebSocketOptions<M> = {},
-): WebSocketIterable<M> {
-  const { signal } = options
+  options: WebSocketOptions<M, T> = {},
+): WebSocketIterable<M, T> {
+  const { signal, parseMessage } = options
   const maxMs = 1000 * (options.maxReconnectSeconds ?? 64)
   const shouldReconnect = normalizeShouldReconnect(options.shouldReconnect)
 
@@ -224,7 +243,21 @@ export async function* websocketFactory<M extends DataMode = 'auto'>(
         // A consumer `break` also lands here, resuming with a return
         // completion: it runs the `finally` and leaves the loop without
         // reaching the throw.
-        yield* transport
+        if (parseMessage) {
+          // Same teardown as `yield*` on every exit: a throw from
+          // `parseMessage`, or a consumer `break` or `throw()` at the `yield`,
+          // makes the `for await` close the transport through `return()`, which
+          // settles only once the socket is down. A throw then reaches the
+          // `catch` below and is classified like any connection failure.
+          for await (const message of transport) {
+            const value = parseMessage(message)
+            if (value !== undefined) yield value
+          }
+        } else {
+          // Without a parser the stream yields raw messages, which is what `T`
+          // defaults to.
+          yield* transport as AsyncIterable<T>
+        }
         throw closeError(closeDetail)
       } catch (error) {
         // An abort is the caller's decision, not a connection failure:

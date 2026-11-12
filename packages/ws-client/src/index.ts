@@ -1,5 +1,5 @@
 import { HEADERS_SUPPORTED, createTransport } from '#transport'
-import type { DataMode } from './message-channel.js'
+import type { DataMode, MessageOf } from './message-channel.js'
 import {
   type Awaitable,
   type WebSocketIterable,
@@ -33,6 +33,7 @@ export {
   HeartbeatTimeoutError,
   IdleTimeoutError,
   SocketError,
+  UnexpectedResponseError,
   WebSocketClientError,
 } from './lib/errors.js'
 export {
@@ -50,12 +51,14 @@ export {
 // @NOTE Must be explicitly typed a boolean
 export const HEADERS_SUPPORTED_PLATFORM: boolean = HEADERS_SUPPORTED
 
-export type NodeWebSocketOptions<M extends DataMode = 'auto'> =
-  WebSocketOptions<M>
-export type BrowserWebSocketOptions<M extends DataMode = 'auto'> = Omit<
-  WebSocketOptions<M>,
-  'headers'
->
+export type NodeWebSocketOptions<
+  M extends DataMode = 'auto',
+  T = MessageOf<M>,
+> = WebSocketOptions<M, T>
+export type BrowserWebSocketOptions<
+  M extends DataMode = 'auto',
+  T = MessageOf<M>,
+> = Omit<WebSocketOptions<M, T>, 'headers'>
 
 /**
  * A function allows building an isomorphic {@link WebSocketIterable}.
@@ -64,15 +67,15 @@ export function websocket(
   url: string | URL | (() => Awaitable<string | URL>),
   options?: WebSocketOptions<'auto'>,
 ): WebSocketIterable<'auto'>
-export function websocket<M extends DataMode>(
+export function websocket<M extends DataMode, T = MessageOf<M>>(
   url: string | URL | (() => Awaitable<string | URL>),
   options: M extends 'auto'
-    ? WebSocketOptions<'auto'>
-    : WebSocketOptions<M> & { dataMode: M },
-): WebSocketIterable<M>
-export function websocket<M extends DataMode>(
+    ? WebSocketOptions<'auto', T>
+    : WebSocketOptions<M, T> & { dataMode: M },
+): WebSocketIterable<M, T>
+export function websocket<M extends DataMode, T = MessageOf<M>>(
   url: string | URL | (() => Awaitable<string | URL>),
-  options: WebSocketOptions<M> = {},
-): WebSocketIterable<M> {
+  options: WebSocketOptions<M, T> = {},
+): WebSocketIterable<M, T> {
   return websocketFactory(url, createTransport, options)
 }

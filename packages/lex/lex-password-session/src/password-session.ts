@@ -289,6 +289,24 @@ export class PasswordSession implements Agent, AsyncDisposable {
   }
 
   /**
+   * Resolves a path against the PDS this session currently talks to: the one
+   * from the session's DID document, falling back to the login service. Waits
+   * for an in-flight refresh first, so the result reflects the latest DID
+   * document.
+   *
+   * This method implements {@link Agent.resolveUrl}. The access token is not
+   * attached to anything made from the returned URL, so requests to it are
+   * unauthenticated.
+   *
+   * @param path - The request path (pathname + query parameters)
+   * @throws {Error} If the session has been destroyed (logged out).
+   */
+  async resolveUrl(path: string): Promise<URL> {
+    const sessionData = await this.#sessionPromise
+    return fetchUrl(sessionData, path)
+  }
+
+  /**
    * Refreshes the session by obtaining new access and refresh tokens.
    *
    * This method is automatically called by {@link fetchHandler} when the access

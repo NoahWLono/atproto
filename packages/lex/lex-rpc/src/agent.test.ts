@@ -49,6 +49,20 @@ describe(isAgent, () => {
       false,
     )
   })
+
+  it('accepts an agent providing resolveUrl', () => {
+    const agent: Agent = {
+      fetchHandler: async () => new Response(),
+      resolveUrl: (path) => new URL(path, 'https://example.com'),
+    }
+    expect(isAgent(agent)).toBe(true)
+  })
+
+  it('returns false when resolveUrl is not a function', () => {
+    expect(
+      isAgent({ fetchHandler: async () => new Response(), resolveUrl: 'x' }),
+    ).toBe(false)
+  })
 })
 
 // ============================================================================
@@ -73,6 +87,50 @@ describe(buildAgent, () => {
 
       expect(agent.did).toBeUndefined()
       expect(typeof agent.fetchHandler).toBe('function')
+    })
+
+    it('cannot resolve urls, since the origin is hidden in the handler', () => {
+      const agent = buildAgent(async () => new Response())
+      expect(agent.resolveUrl).toBeUndefined()
+    })
+  })
+
+  describe('resolveUrl', () => {
+    it('resolves paths against the service the requests go to', async () => {
+      const fetch = vi.fn(async () => new Response())
+      const agent = buildAgent({
+        service: 'https://example.com/ignored',
+        fetch,
+      })
+      const path = '/xrpc/io.example.subscribe?cursor=1' as const
+
+      expect(String(await agent.resolveUrl?.(path))).toBe(
+        'https://example.com/xrpc/io.example.subscribe?cursor=1',
+      )
+      await agent.fetchHandler(path, { method: 'GET' })
+      expect(fetch).toHaveBeenCalledWith(
+        await agent.resolveUrl?.(path),
+        expect.anything(),
+      )
+    })
+
+    it('does not depend on being called as a method', async () => {
+      const { resolveUrl } = buildAgent(new URL('https://example.com'))
+      expect(String(await resolveUrl?.('/xrpc/x'))).toBe(
+        'https://example.com/xrpc/x',
+      )
+    })
+
+    it('cannot be overridden through AgentConfig', () => {
+      const config = {
+        service: 'https://example.com',
+        resolveUrl: () => new URL('https://other.example'),
+      }
+      // @ts-expect-error resolveUrl is derived from `service`
+      const agent = buildAgent(config)
+      expect(String(agent.resolveUrl?.('/xrpc/x'))).toBe(
+        'https://example.com/xrpc/x',
+      )
     })
   })
 

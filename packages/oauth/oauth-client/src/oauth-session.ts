@@ -93,6 +93,21 @@ export class OAuthSession {
     }
   }
 
+  /**
+   * Resolves a path against the resource server (PDS) this session's tokens
+   * are issued for — where {@link fetchHandler} sends requests. Like
+   * {@link fetchHandler}, it refreshes the credentials first if they are known
+   * to be expired, since a refresh may move the session to a new PDS.
+   *
+   * Implements the `resolveUrl` member of the `@atproto/lex-rpc` `Agent`
+   * interface. Nothing from the session (access token, DPoP proof) is attached
+   * to requests made to the returned URL, so they are unauthenticated.
+   */
+  async resolveUrl(pathname: string): Promise<URL> {
+    const tokenSet = await this.getTokenSet('auto')
+    return new URL(pathname, tokenSet.aud)
+  }
+
   async fetchHandler(pathname: string, init?: RequestInit): Promise<Response> {
     // This will try and refresh the token if it is known to be expired
     const tokenSet = await this.getTokenSet('auto')

@@ -265,6 +265,30 @@ describe(PasswordSession, () => {
     })
   })
 
+  it('resolves urls against the PDS from its DID document', async () => {
+    const session = await PasswordSession.login({
+      ...defaultOptions,
+      service: entrywayOrigin,
+      identifier: 'alice',
+      password: 'password123',
+      authFactorToken: '2fa-token',
+    })
+
+    // Not the entryway the session logged in through.
+    expect(String(await session.resolveUrl('/xrpc/io.example.sub?a=1'))).toBe(
+      `${pdsOrigin}/xrpc/io.example.sub?a=1`,
+    )
+
+    // Still resolves after a refresh, whose response omits the DID document.
+    await session.refresh()
+    expect(String(await session.resolveUrl('/xrpc/x'))).toBe(
+      `${pdsOrigin}/xrpc/x`,
+    )
+
+    await session.logout()
+    await expect(session.resolveUrl('/xrpc/x')).rejects.toThrow('Logged out')
+  })
+
   it('fails to perform unauthenticated call', async () => {
     const agent = buildAgent(pdsOrigin)
     const result = await xrpcSafe(agent, app.example.customMethod, {
