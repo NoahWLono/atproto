@@ -1,5 +1,11 @@
 # @atproto/pds
 
+## 0.5.58
+
+### Patch Changes
+
+- [#5866](https://github.com/bluesky-social/atproto/pull/5866) [`b4dac06`](https://github.com/bluesky-social/atproto/commit/b4dac063aba56e4be8085d0da3888c7bc55e6102) Thanks [@amckinley](https://github.com/amckinley)! - With `PDS_ENTRYWAY_REQUIRE_SERVICE_AUTH=true`, `com.atproto.server.createAccount` now requires the entryway's service JWT, as the other entryway-called routes do: unauthenticated calls are refused with `AuthenticationRequired`. Enable that setting only once the entryway in front of the PDS signs its `createAccount` calls. Without it, unauthenticated calls are still accepted, and PDSes without entryway configuration are unaffected.
+
 ## 0.5.57
 
 ### Patch Changes
